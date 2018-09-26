@@ -1,0 +1,18 @@
+{
+  "name": "gdtool",
+  "version": "0.0.1",
+  "description": "Tool to create and manage data in MDN's GroupData.json file.",
+  "main": "index.js",
+  "bin": {
+    "groupdata-scan": "./index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Eric Shepherd",
+  "license": "CC0-1.0",
+  "dependencies": {
+    "webidl2": "^14.0.1",
+    "commander": "^2.18.0"
+  }
+}
