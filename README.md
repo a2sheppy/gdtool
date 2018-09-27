@@ -1,5 +1,5 @@
 # gdtool
-Tool for creating and working with MDN's `GroupData.json` file. Eventually I'd like this to have an assortment of commands to manage these files but for now it only has one feature: taking a specification, pulling out the WebIDL, and generating the `GroupData.json` formateed data for it.
+Tool for creating and working with MDN's `GroupData.json` file. Eventually I'd like this to have an assortment of commands to manage these files but for now it only has one feature: taking a specification, pulling out the WebIDL, and generating the `GroupData.json` formatted data for it.
 
 ## Installation
 
