@@ -3,8 +3,9 @@ Tool for creating and working with MDN's `GroupData.json` file. Eventually I'd l
 
 ## Installation
 
+To install `gdtool` as a globally available command line tool:
 ```
-npm intall -g gdtool
+npm intall -g
 ```
 
 ## Usage
