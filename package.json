@@ -1,6 +1,6 @@
 {
   "name": "gdtool",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Tool to create and manage data in MDN's GroupData.json file.",
   "main": "index.js",
   "bin": {
@@ -10,10 +10,13 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Eric Shepherd",
+  "organization": "Mozilla",
   "license": "Unlicense",
   "dependencies": {
+    "commander": "^2.18.0",
+    "endpoint": "^0.4.5",
     "webidl2": "^14.0.1",
-    "commander": "^2.18.0"
+    "webidl-extract": "a2sheppy/webidl-extract"
   },
   "keywords": [
     "MDN",

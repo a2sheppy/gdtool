@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 
 const WebIDL = require("webidl2");
+const ExtractWebIDL = require("webidl-extract");
+
 const program = require("commander");
 const process = require("process");
 const package = require("./package.json");
 const fs = require("fs");
-const util = require("util");
+const endpoint = require("endpoint");
+const http = require("http");
+const https = require("https");
 
 /* Callback handling modes */
 
@@ -20,6 +24,9 @@ var apiName;
 var optionCallbackMode = CALLBACKS_LIST_SEPARATELY;
 var sourcePath;
 var outputFile = null;  // stdout; if not null, direct to file
+
+var tabSize = 2;
+var indentLevel = 4;
 
 // Custom methods on Array to allow pushing only unique values
 
@@ -46,7 +53,8 @@ function itemCompare(a, b) {
 
 program
   .version(package.version, '-v, --version')
-  .description('Scan the specified WebIDL file to generate GroupData.json output')
+  .usage('[options] <specification>')
+  .description('Scan the specified WebIDL file to generate GroupData.json output for a specification given by filename or URL')
   .option('-a, --api-name [name]', 'name of the API')
   .option('-c, --callback-mode [mode]', 'callback mode: ignore, type, or callback', /^(ignore|type|callback)$/i, 'callback')
   .option('-o, --output-file [file]', 'direct output to the specified file')
@@ -61,7 +69,7 @@ if (!process.argv.slice(2).length) {
 if (program.args.length) {
   sourcePath = program.args[0];
 } else {
-  console.error("groupdata-scan: No input file specified");
+  console.error(program.name + ": No input file specified");
   return 1;
 }
 apiName = program.apiName || "API NAME HERE";
@@ -84,16 +92,34 @@ switch(program.callbackMode) {
     break;
 }
 
-/* Read and parse the file */
+/* If the source path is a URL, we will need to
+   fetch and pull the WebIDL from the linked spec */
 
-fs.readFile(sourcePath, "utf8", (err, sourceIDL) => {
-  if (err) {
-    throw err;
-  }
+if (sourcePath.startsWith("https://")) {
+  getSpecIDL(sourcePath, function(err, sourceIDL) {
+    if (err) {
+      console.error(err);
+      return;
+    }
 
+    idlToGroupData(sourceIDL);
+  });
+} else {
+  fs.readFile(sourcePath, "utf8", (err, sourceIDL) => {
+    if (err) {
+      console.error(err);
+      return;
+    }
+
+    idlToGroupData(sourceIDL);
+  });
+}
+
+/* Parse the specified IDL and output it to either the
+   command-line specified output file or to console */
+
+function idlToGroupData(sourceIDL) {
   let tree = WebIDL.parse(sourceIDL);
-  //let treeText = util.inspect(tree);
-  //console.log(treeText);
 
   // Go through all the top-level entries and find the stuff
   // we need to add.
@@ -170,10 +196,9 @@ fs.readFile(sourcePath, "utf8", (err, sourceIDL) => {
   } else {
     console.log(output);
   }
-});
+}
 
-let tabSize = 2;
-let indentLevel = 4;
+/* Actually generate the GroupData syntax from the set of items */
 
 function generateGroupData(apiName, typeList, interfaceList, dictionaryList, callbackList) {
   let output = "";
@@ -285,4 +310,22 @@ function buildSection(sectionName, itemList) {
 
   indentLevel--;
   return output;
+}
+
+/*
+ * Load a spec from a URL, returning only the WebIDL contained within.
+ *
+ */
+function getSpecIDL(specUrl, callback) {
+  let titleRegexp = RegExp("<\s*title\s*>\s*(.*?)\s*<\s*\/\s*title>", "ig");
+
+  https.get(specUrl, function(response) {
+    response.pipe(new ExtractWebIDL())
+            .pipe(endpoint(function(err, content) {
+              if (err) {
+                return callback(err);
+              }
+              callback(null, content.toString());
+            }));
+  });
 }
