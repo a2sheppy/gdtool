@@ -13,6 +13,7 @@
   "organization": "Mozilla",
   "license": "Unlicense",
   "dependencies": {
+    "request": "^2.88.0",
     "commander": "^2.18.0",
     "endpoint": "^0.4.5",
     "webidl2": "^14.0.1",

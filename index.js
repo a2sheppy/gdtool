@@ -5,11 +5,10 @@ const ExtractWebIDL = require("webidl-extract");
 
 const program = require("commander");
 const process = require("process");
-const package = require("./package.json");
 const fs = require("fs");
 const endpoint = require("endpoint");
-const http = require("http");
-const https = require("https");
+const request = require("request");
+const package = require("./package.json");
 
 /* Callback handling modes */
 
@@ -22,7 +21,6 @@ const CALLBACKS_LIST_SEPARATELY = 2;
 
 var apiName;
 var optionCallbackMode = CALLBACKS_LIST_SEPARATELY;
-var sourcePath;
 var outputFile = null;  // stdout; if not null, direct to file
 
 var tabSize = 2;
@@ -49,16 +47,28 @@ function itemCompare(a, b) {
   return a.name.localeCompare(b.name);
 }
 
-/* Interpret command line options */
+/* Set up general command options */
 
 program
   .version(package.version, '-v, --version')
-  .usage('[options] <specification>')
+  .usage('<command> [options] [command-options]')
+  .description("Utility to generate and validate GroupData.json format data.")
+
+/* Command: generate */
+
+program
+  .command("generate <spec>")
+  .alias("gen")
+//  .arguments("[options] <spec>")
   .description('Scan the specified WebIDL file to generate GroupData.json output for a specification given by filename or URL')
   .option('-a, --api-name [name]', 'name of the API')
   .option('-c, --callback-mode [mode]', 'callback mode: ignore, type, or callback', /^(ignore|type|callback)$/i, 'callback')
   .option('-o, --output-file [file]', 'direct output to the specified file')
-  .parse(process.argv);
+  .action(doGenerateGroupData);
+  
+  /* Now run the command interpreter */
+
+  program.parse(process.argv);
 
 if (!process.argv.slice(2).length) {
   program.help();
@@ -66,53 +76,49 @@ if (!process.argv.slice(2).length) {
 
 /* Get the source WebIDL path */
 
-if (program.args.length) {
-  sourcePath = program.args[0];
-} else {
-  console.error(program.name + ": No input file specified");
-  return 1;
-}
-apiName = program.apiName || "API NAME HERE";
-outputFile = program.outputFile || null;
+function doGenerateGroupData(sourcePath, program) {
+  apiName = program.apiName || "API NAME HERE";
+  outputFile = program.outputFile || null;
 
-// Select how to include callbacks
+  // Select how to include callbacks
 
-switch(program.callbackMode) {
-  case "ignore":
-    optionCallbackMode = CALLBACKS_IGNORE;
-    break;
-  case "type":
-    optionCallbackMode = CALLBACKS_LIST_AS_TYPES;
-    break;
-  case "callback":
-    optionCallbackMode = CALLBACKS_LIST_SEPARATELY;
-    break;
-  default:
-    optionCallbackMode = CALLBACKS_LIST_SEPARATELY;
-    break;
-}
+  switch(program.callbackMode) {
+    case "ignore":
+      optionCallbackMode = CALLBACKS_IGNORE;
+      break;
+    case "type":
+      optionCallbackMode = CALLBACKS_LIST_AS_TYPES;
+      break;
+    case "callback":
+      optionCallbackMode = CALLBACKS_LIST_SEPARATELY;
+      break;
+    default:
+      optionCallbackMode = CALLBACKS_LIST_SEPARATELY;
+      break;
+  }
 
-/* If the source path is a URL, we will need to
-   fetch and pull the WebIDL from the linked spec */
+  /* If the source path is a URL, we will need to
+    fetch and pull the WebIDL from the linked spec */
 
-if (sourcePath.startsWith("https://")) {
-  getSpecIDL(sourcePath, function(err, sourceIDL) {
-    if (err) {
-      console.error(err);
-      return;
-    }
+  if (sourcePath.startsWith("https://")) {
+    getSpecIDL(sourcePath, function(err, sourceIDL) {
+      if (err) {
+        console.error(err);
+        return;
+      }
 
-    idlToGroupData(sourceIDL);
-  });
-} else {
-  fs.readFile(sourcePath, "utf8", (err, sourceIDL) => {
-    if (err) {
-      console.error(err);
-      return;
-    }
+      idlToGroupData(sourceIDL);
+    });
+  } else {
+    fs.readFile(sourcePath, "utf8", (err, sourceIDL) => {
+      if (err) {
+        console.error(err);
+        return;
+      }
 
-    idlToGroupData(sourceIDL);
-  });
+      idlToGroupData(sourceIDL);
+    });
+  }
 }
 
 /* Parse the specified IDL and output it to either the
@@ -317,15 +323,13 @@ function buildSection(sectionName, itemList) {
  *
  */
 function getSpecIDL(specUrl, callback) {
-  let titleRegexp = RegExp("<\s*title\s*>\s*(.*?)\s*<\s*\/\s*title>", "ig");
+//  let titleRegexp = RegExp("<\s*title\s*>\s*(.*?)\s*<\s*\/\s*title>", "ig");
 
-  https.get(specUrl, function(response) {
-    response.pipe(new ExtractWebIDL())
-            .pipe(endpoint(function(err, content) {
-              if (err) {
-                return callback(err);
-              }
-              callback(null, content.toString());
-            }));
-  });
+  request(specUrl).pipe(new ExtractWebIDL())
+    .pipe(endpoint(function(err, content) {
+      if (err) {
+        return callback(err);
+      }
+      callback(null, content.toString());
+    }));
 }
