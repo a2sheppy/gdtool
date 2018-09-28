@@ -59,7 +59,6 @@ program
 program
   .command("generate <spec>")
   .alias("gen")
-//  .arguments("[options] <spec>")
   .description('Scan the specified WebIDL file to generate GroupData.json output for a specification given by filename or URL')
   .option('-a, --api-name [name]', 'name of the API')
   .option('-c, --callback-mode [mode]', 'callback mode: ignore, type, or callback', /^(ignore|type|callback)$/i, 'callback')
