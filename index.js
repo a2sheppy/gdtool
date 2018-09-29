@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 
 const WebIDL = require("webidl2");
-const ExtractWebIDL = require("webidl-extract");
-
+//const ExtractWebIDL = require("webidl-extract");
+const WebIDLFetchFromString = require("webidl-extract").WebIDLFetchFromString;
 const program = require("commander");
 const process = require("process");
+const util = require("util");
 const fs = require("fs");
 const endpoint = require("endpoint");
-const request = require("request");
+const request = require("request-promise-native");
 const package = require("./package.json");
+
+/* Creats Promise-based version of fs.readFile */
+
+const readFileAsync = util.promisify(fs.readFile);
 
 /* Callback handling modes */
 
@@ -25,6 +30,14 @@ var outputFile = null;  // stdout; if not null, direct to file
 
 var tabSize = 2;
 var indentLevel = 4;
+
+// Handle unprocessed promise rejections, for debugging
+// and other reasons
+
+process.on("unhandledRejection", error => {
+  console.error("OH NOES! " + error.message + ": ");
+  console.dir(error);
+});
 
 // Custom methods on Array to allow pushing only unique values
 
@@ -57,14 +70,14 @@ program
 /* Command: generate */
 
 program
-  .command("generate <spec>")
+  .command("generate <specOrIDL...>")
   .alias("gen")
-  .description('Scan the specified WebIDL file to generate GroupData.json output for a specification given by filename or URL')
+  .description('Scan the specified WebIDL file(s) and/or specification(s) to generate GroupData.json output for a specification given by filename or URL')
   .option('-a, --api-name [name]', 'name of the API')
   .option('-c, --callback-mode [mode]', 'callback mode: ignore, type, or callback', /^(ignore|type|callback)$/i, 'callback')
   .option('-o, --output-file [file]', 'direct output to the specified file')
   .action(doGenerateGroupData);
-  
+
   /* Now run the command interpreter */
 
   program.parse(process.argv);
@@ -73,9 +86,29 @@ if (!process.argv.slice(2).length) {
   program.help();
 }
 
-/* Get the source WebIDL path */
+/*
+ * class APIDescription
+ * 
+ * Information about a class; currently just storage
+ * for the item lists but eventually more will migrate
+ * into this.
+ */
+class APIDescription {
+  constructor() {
+    this.typeList = [];
+    this.interfaceList = [];
+    this.dictionaryList = [];
+    this.callbackList = [];
+  }
+}
 
-function doGenerateGroupData(sourcePath, program) {
+var apiItemRecord = new APIDescription();
+
+/* Process the specs and/or files and output the GroupData for all
+   the IDL within them */
+
+async function doGenerateGroupData(specList, program) {
+  var idlList = [];     // A string with each input's IDL
   apiName = program.apiName || "API NAME HERE";
   outputFile = program.outputFile || null;
 
@@ -96,43 +129,72 @@ function doGenerateGroupData(sourcePath, program) {
       break;
   }
 
-  /* If the source path is a URL, we will need to
-    fetch and pull the WebIDL from the linked spec */
+  /* Iterate over the items in specList, fetching each
+     spec and getting the IDL, building one large IDL
+     buffer */
 
-  if (sourcePath.startsWith("https://")) {
-    getSpecIDL(sourcePath, function(err, sourceIDL) {
-      if (err) {
-        console.error(err);
-        return;
-      }
+   await Promise.all(specList.map(async function(sourcePath) {
+    try {
+      idlList.push(await fetchIDL(sourcePath));
+    } catch(err) {
+      console.error(err);
+    }
+  }));
 
-      idlToGroupData(sourceIDL);
-    });
+  /* Go through each IDL chunk and get the items inside */
+
+  idlList.forEach(function(idl) {
+    getItemsFromIDL(idl);
+  });
+
+  outputGroupData(buildGroupData(apiItemRecord));
+}
+
+/* Load one IDL file from either disk or URL */
+
+async function fetchIDL(sourcePath) {
+  let urlRegex = new RegExp("https?:\/\/.+", "ig");
+
+  if (urlRegex.test(sourcePath)) {
+    try {
+      return await getRemoteIDL(sourcePath);
+    } catch(err) {
+      console.error(err);
+      return '';
+    }
   } else {
-    fs.readFile(sourcePath, "utf8", (err, sourceIDL) => {
-      if (err) {
-        console.error(err);
-        return;
-      }
-
-      idlToGroupData(sourceIDL);
-    });
+    return await getLocalIDL(sourcePath);
   }
 }
 
-/* Parse the specified IDL and output it to either the
-   command-line specified output file or to console */
+/* Fetch an IDL file using a pathname, asynchronously */
 
-function idlToGroupData(sourceIDL) {
+async function getLocalIDL(sourcePath) {
+  return await readFileAsync(sourcePath, "utf8");
+}
+
+/*
+ * Load a spec from a URL, returning only the WebIDL contained within.
+ *
+ */
+let titleRegexp = RegExp("<\s*title\s*>\s*(.*?)\s*<\s*\/\s*title>", "ig");
+async function getRemoteIDL(specUrl) {
+  let idl = '';
+  
+  idl = await request(specUrl).then(html => {
+    return WebIDLFetchFromString(html);
+  }).catch(function(err) {
+    console.error(err);
+  });
+
+  return idl;
+}
+
+/* Given the text of an IDL file, add any top-level items
+   within it to the item lists */
+
+function getItemsFromIDL(sourceIDL) {
   let tree = WebIDL.parse(sourceIDL);
-
-  // Go through all the top-level entries and find the stuff
-  // we need to add.
-
-  let typeList = [];
-  let interfaceList = [];
-  let dictionaryList = [];
-  let callbackList = [];
 
   tree.forEach(function(item) {
     let type = item.type;
@@ -151,24 +213,24 @@ function idlToGroupData(sourceIDL) {
         console.error("Ignoring mixing: " + item.name);
         break;
       case "dictionary":
-        dictionaryList.pushIfUnique(item);
+        apiItemRecord.dictionaryList.pushIfUnique(item);
         break;
       case "typedef":
       case "enum":
-        typeList.pushIfUnique(item);
+        apiItemRecord.typeList.pushIfUnique(item);
         break;
       case "interface":
-        interfaceList.pushIfUnique(item);
+        apiItemRecord.interfaceList.pushIfUnique(item);
         break;
       case "callback":
         switch (optionCallbackMode) {
           case CALLBACKS_IGNORE:
             break;
           case CALLBACKS_LIST_AS_TYPES:
-            typeList.pushIfUnique(item);
+            apiItemRecord.typeList.pushIfUnique(item);
             break;
           case CALLBACKS_LIST_SEPARATELY:
-            callbackList.pushIfUnique(item);
+            apiItemRecord.callbackList.pushIfUnique(item);
             break;
           default:
             break;
@@ -181,17 +243,26 @@ function idlToGroupData(sourceIDL) {
         break;
     }
   });
+}
 
-  typeList = typeList.sort(itemCompare);
-  interfaceList = interfaceList.sort(itemCompare);
-  dictionaryList = dictionaryList.sort(itemCompare);
+/* Given the item lists, build the GroupData output */
+
+function buildGroupData(apiData) {
+  apiData.typeList = apiData.typeList.sort(itemCompare);
+  apiData.interfaceList = apiData.interfaceList.sort(itemCompare);
+  apiData.dictionaryList = apiData.dictionaryList.sort(itemCompare);
 
   if (optionCallbackMode == CALLBACKS_LIST_SEPARATELY) {
-    callbackList = callbackList.sort(itemCompare);
+    apiData.callbackList = apiData.callbackList.sort(itemCompare);
   }
 
-  let output = generateGroupData(apiName, typeList, interfaceList, dictionaryList, callbackList);
+  return generateGroupData(apiData);
+}
 
+/* Output the GroupData to either console or the output file,
+   if one was specified using --out-file */
+
+function outputGroupData(output) {
   if (outputFile) {
     fs.writeFile(outputFile, output, function(err) {
       if (err) {
@@ -199,13 +270,13 @@ function idlToGroupData(sourceIDL) {
       }
     });
   } else {
-    console.log(output);
+    console.log(output);    // Dump to console
   }
 }
 
 /* Actually generate the GroupData syntax from the set of items */
 
-function generateGroupData(apiName, typeList, interfaceList, dictionaryList, callbackList) {
+function generateGroupData(apiData) {
   let output = "";
 
   // First add the key and opening brace
@@ -223,17 +294,17 @@ function generateGroupData(apiName, typeList, interfaceList, dictionaryList, cal
 
   // Section: interfaces
 
-  output += buildSection("interfaces", interfaceList);
+  output += buildSection("interfaces", apiData.interfaceList);
   output += ",\n";
 
   // Section: dictionaries
 
-  output += buildSection("dictionaries", dictionaryList);
+  output += buildSection("dictionaries", apiData.dictionaryList);
   output += ",\n";
 
   // Section: types
 
-  output += buildSection("types", typeList);
+  output += buildSection("types", apiData.typeList);
   output += ",\n";
 
   // Section: methods
@@ -251,7 +322,7 @@ function generateGroupData(apiName, typeList, interfaceList, dictionaryList, cal
   // Section: callbacks (if optionCallbackMode is CALLBACKS_LIST_SEPARATELY)
 
   if (optionCallbackMode == CALLBACKS_LIST_SEPARATELY) {
-    output += buildSection("callbacks", callbackList);
+    output += buildSection("callbacks", apiData.callbackList);
     output += "\n";
   }
 
@@ -315,20 +386,4 @@ function buildSection(sectionName, itemList) {
 
   indentLevel--;
   return output;
-}
-
-/*
- * Load a spec from a URL, returning only the WebIDL contained within.
- *
- */
-function getSpecIDL(specUrl, callback) {
-//  let titleRegexp = RegExp("<\s*title\s*>\s*(.*?)\s*<\s*\/\s*title>", "ig");
-
-  request(specUrl).pipe(new ExtractWebIDL())
-    .pipe(endpoint(function(err, content) {
-      if (err) {
-        return callback(err);
-      }
-      callback(null, content.toString());
-    }));
 }

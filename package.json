@@ -13,11 +13,12 @@
   "organization": "Mozilla",
   "license": "Unlicense",
   "dependencies": {
-    "request": "^2.88.0",
     "commander": "^2.18.0",
     "endpoint": "^0.4.5",
-    "webidl2": "^14.0.1",
-    "webidl-extract": "a2sheppy/webidl-extract"
+    "request": "^2.88.0",
+    "request-promise-native": "^1.0.5",
+    "webidl-extract": "a2sheppy/webidl-extract",
+    "webidl2": "^14.0.1"
   },
   "keywords": [
     "MDN",
